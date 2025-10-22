@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulador Avanzado de Radiaciones Infrarrojas</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; }
+        h1 { color: #333; }
+        .container { max-width: 1000px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        .controls { margin-bottom: 20px; display: flex; flex-wrap: wrap; gap: 15px; }
+        label { display: block; margin-top: 10px; font-weight: bold; }
+        input[type="range"] { width: 100%; }
+        button { padding: 10px 15px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        canvas { max-width: 100%; margin-top: 20px; }
+        .info { margin-top: 20px; padding: 10px; background: #e9f7ff; border-left: 5px solid #007bff; }
+        .chart-container { display: flex; flex-wrap: wrap; gap: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Simulador Avanzado de Radiaciones Infrarrojas</h1>
+        <p>Este simulador modela la emisión IR con más controles: temperatura, emisividad y distancia. Incluye gráficos interactivos y exportación de datos.</p>
+        
+        <div class="controls">
+            <div>
+                <label for="temp">Temperatura (K): <span id="tempValue">300</span></label>
+                <input type="range" id="temp" min="100" max="10000" value="300" step="10">
+            </div>
+            <div>
+                <label for="emis">Emisividad (0-1): <span id="emisValue">1.0</span></label>
+                <input type="range" id="emis" min="0" max="1" value="1" step="0.01">
+            </div>
+            <div>
+                <label for="dist">Distancia (m): <span id="distValue">1</span></label>
+                <input type="range" id="dist" min="0.1" max="100" value="1" step="0.1">
+            </div>
+            <div>
+                <button id="animateBtn">Animar Temperatura</button>
+                <button id="resetBtn">Resetear</button>
+                <button id="exportBtn">Exportar Datos CSV</button>
+            </div>
+        </div>
+        
+        <div class="chart-container">
+            <div style="flex: 1;">
+                <h3>Espectro IR (Intensidad vs. Longitud de Onda)</h3>
+                <canvas id="spectrumChart"></canvas>
+            </div>
+            <div style="flex: 1;">
+                <h3>Radiancia Total vs. Temperatura</h3>
+                <canvas id="radianceChart"></canvas>
+            </div>
+        </div>
+        
+        <div class="info">
+            <h3>Información Calculada:</h3>
+            <p><strong>Radiancia Total (W/m², ajustada por emisividad y distancia):</strong> <span id="totalRadiance">0</span></p>
+            <p><strong>Longitud de Onda Pico (μm):</strong> <span id="peakWavelength">0</span></p>
+            <p><strong>Notas:</strong> La radiación IR es no ionizante. Emisividad afecta la emisión real; distancia reduce la intensidad recibida. Usa la animación para ver cambios dinámicos.</p>
+        </div>
+    </div>
+
+    <script>
+        const spectrumCtx = document.getElementById('spectrumChart').getContext('2d');
+        const radianceCtx = document.getElementById('radianceChart').getContext('2d');
+        const tempSlider = document.getElementById('temp');
+        const emisSlider = document.getElementById('emis');
+        const distSlider = document.getElementById('dist');
+        const tempValue = document.getElementById('tempValue');
+        const emisValue = document.getElementById('emisValue');
+        const distValue = document.getElementById('distValue');
+        const totalRadianceEl = document.getElementById('totalRadiance');
+        const peakWavelengthEl = document.getElementById('peakWavelength');
+        const animateBtn = document.getElementById('animateBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const exportBtn = document.getElementById('exportBtn');
+
+        // Constantes físicas
+        const h = 6.626e-34;
+        const c = 3e8;
+        const k = 1.381e-23;
+        const sigma = 5.67e-8;
+
+        // Función para intensidad espectral (ley de Planck)
+        function planckIntensity(lambda, T) {
+            const lambdaM = lambda * 1e-6;
+            const expTerm = Math.exp((h * c) / (lambdaM * k * T));
+            return (2 * h * c * c) / (lambdaM ** 5 * (expTerm - 1));
+        }
+
+        // Radiancia total ajustada (emisividad y distancia)
+        function adjustedRadiance(T, emis, dist) {
+            const baseRadiance = sigma * T ** 4 * emis;
+            return baseRadiance / (dist ** 2); // Ley del cuadrado inverso
+        }
+
+        // Longitud de onda pico
+        function peakWavelength(T) {
+            return 2898 / T;
+        }
+
+        // Datos para gráficos
+        const wavelengths = [];
+        for (let i = 0.1; i <= 100; i += 0.1) {
+            wavelengths.push(i);
+        }
+        const temperatures = [];
+        for (let t = 100; t <= 10000; t += 100) {
+            temperatures.push(t);
+        }
+
+        // Gráfico del espectro
+        let spectrumChart = new Chart(spectrumCtx, {
+            type: 'line',
+            data: {
+                labels: wavelengths,
+                datasets: [{
+                    label: 'Intensidad Espectral (W/m²/μm)',
+                    data: wavelengths.map(lambda => planckIntensity(lambda, 300)),
+                    borderColor: 'rgba(255, 99, 132, 1)',
+                    backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                    fill: true,
+                }]
+            },
+            options: {
+                scales: {
+                    x: { title: { display: true, text: 'Longitud de Onda (μm)' }, type: 'logarithmic' },
+                    y: { title: { display: true, text: 'Intensidad (W/m²/μm)' }, type: 'logarithmic' }
+                },
+                plugins: { tooltip: { mode: 'index' } }
+            }
+        });
+
+        // Gráfico de radiancia vs. temperatura
+        let radianceChart = new Chart(radianceCtx, {
+            type: 'line',
+            data: {
+                labels: temperatures,
+                datasets: [{
+                    label: 'Radiancia Total (W/m²)',
+                    data: temperatures.map(t => sigma * t ** 4),
+                    borderColor: 'rgba(54, 162, 235, 1)',
+                    backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                    fill: true,
+                }]
+            },
+            options: {
+                scales: {
+                    x: { title: { display: true, text: 'Temperatura (K)' } },
+                    y: { title: { display: true, text: 'Radiancia (W/m²)' } }
+                },
+                plugins: { tooltip: { mode: 'index' } }
+            }
+        });
+
+        // Función para actualizar todo
+        function updateSim() {
+            const T = parseFloat(tempSlider.value);
+            const emis = parseFloat(emisSlider.value);
+            const dist = parseFloat(distSlider.value);
+            
+            tempValue.textContent = T;
+            emisValue.textContent = emis.toFixed(2);
+            distValue.textContent = dist.toFixed(1);
+            
+            // Actualizar espectro
+            spectrumChart.data.datasets[0].data = wavelengths.map(lambda => planckIntensity(lambda, T));
+            spectrumChart.update();
+            
+            // Actualizar radiancia ajustada
+            const rad = adjustedRadiance(T, emis, dist);
+            totalRadianceEl.textContent = rad.toExponential(2);
+            peakWavelengthEl.textContent = peakWavelength(T).toFixed(2);
+            
+            // Actualizar gráfico de radiancia (fijo, pero podría ajustarse)
+            radianceChart.update();
+        }
+
+        // Eventos de sliders
+        tempSlider.addEventListener('input', updateSim);
+        emisSlider.addEventListener('input', updateSim);
+        distSlider.addEventListener('input', updateSim);
+
+        // Animación
+        animateBtn.addEventListener('click', () => {
+            let t = 100;
+            const interval = setInterval(() => {
+                tempSlider.value = t;
+                updateSim();
+                t += 100;
+                if (t > 10000) clearInterval(interval);
+            }, 100);
+        });
+
+        // Reset
+        resetBtn.addEventListener('click', () => {
+            tempSlider.value = 300;
+            emisSlider.value = 1;
+            distSlider.value = 1;
+            updateSim();
+        });
+
+        // Exportar CSV
+        exportBtn.addEventListener('click', () => {
+            const T = parseFloat(tempSlider.value);
+            let csv = 'Longitud de Onda (μm),Intensidad (W/m²/μm)\n';
+            wavelengths.forEach((lambda, i) => {
+                csv += `${lambda},${planckIntensity(lambda, T)}\n`;
+            });
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'espectro_ir.csv';
+            a.click();
+        });
+
+        // Inicializar
+        updateSim();
+    </script>
+</body>
+</html>
